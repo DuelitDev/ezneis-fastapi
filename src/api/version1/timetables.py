@@ -9,6 +9,8 @@ __all__ = [
 ]
 
 
+# region utilities implementation
+
 def get_app_grade_from(
         timetables, grade: Literal["0", "1", "2", "3", "4", "5", "6", "7"]):
     match grade:
@@ -58,6 +60,10 @@ def get_app_grade_classname_period_from(
         case "19": return timetables.period19
         case _: raise HTTPException(status_code=400, detail="Invalid period.")
 
+# endregion
+
+
+# region endpoint implementation
 
 app = FastAPI()
 
@@ -193,6 +199,8 @@ async def app_weekday_grade_classname_period(
                         "11", "12", "13", "14", "15", "16", "17", "18", "19"]):
     return get_app_grade_classname_period_from(
         await app_weekday(weekday), grade, classname, period)
+
+# endregion
 
 
 if __name__ == "__main__":

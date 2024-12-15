@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from api.version1.main import app as v1
 
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 app = FastAPI()
 
 

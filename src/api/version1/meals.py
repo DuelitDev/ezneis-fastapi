@@ -2,11 +2,46 @@ import ezneis
 from ..common import *
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from typing import Literal
 
 __all__ = [
     "app"
 ]
+
+
+# region models implementation
+
+class Dish(BaseModel):
+    name: str
+    allergies: tuple[Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+                             12, 13, 14, 15, 16, 17, 18, 19], ...]
+
+
+class Nutrient(BaseModel):
+    name: str
+    unit: str = "mg"
+    value: float
+
+
+class Origin(BaseModel):
+    name: str
+    origin: str
+
+
+class Meal(BaseModel):
+    time: Literal[1, 2, 3]
+    date: str = "2025-01-01"
+    headcount: int
+    dishes: tuple[Dish, ...]
+    origins: tuple[Origin, ...]
+    kcal: float
+    nutrients: tuple[Nutrient, ...]
+
+# endregion
+
+
+# region utilities implementation
 
 BREAKFASTS = 8 * 3600 + 10 * 60   # 8:10
 LUNCHES    = 13 * 3600 + 10 * 60  # 13:10
@@ -18,6 +53,12 @@ def get_today_sec() -> int:
     return today.hour * 3600 + today.minute * 60 + today.second
 
 
+def only_one(it):
+    if len(it) == 1:
+        return it[0]
+    return type(it)()
+
+
 def get_app_time_from(meals, time: Literal["breakfasts", "lunches", "dinners"]):
     match time:
         case "breakfasts": return meals.breakfasts
@@ -25,58 +66,96 @@ def get_app_time_from(meals, time: Literal["breakfasts", "lunches", "dinners"]):
         case "dinners":    return meals.dinners
         case _: raise HTTPException(status_code=400, detail="Invalid time.")
 
-
-def get_app_now_from(meals):
-    sec = get_today_sec()
-    match sec:
-        case sec if sec < BREAKFASTS: return meals.breakfasts
-        case sec if sec < LUNCHES:    return meals.lunches
-        case sec if sec < DINNERS:    return meals.dinners
-    return tuple()
+# endregion
 
 
+# region endpoint implementation
 
 app = FastAPI()
 
 
-@app.get("/")
+# noinspection SpellCheckingInspection
+@app.get("/", response_model=list[Meal])
 async def root():
+    """
+    이번 주의 모든 급식 식단 정보를 반환합니다.
+    """
     data = await ezneis.get_school_async(KEY, NAME)
     return await data.meals
 
 
-@app.get("/all")
+# noinspection SpellCheckingInspection
+@app.get("/all", response_model=list[Meal])
 async def app_all():
+    """
+    이번 주의 모든 급식 식단 정보를 반환합니다.
+    """
     return await root()
 
 
-@app.get("/all/{time}")
+# noinspection SpellCheckingInspection
+@app.get("/all/{time}", response_model=list[Meal])
 async def app_all_time(
         time: Literal["breakfasts", "lunches", "dinners"]):
+    """
+    이번 주의 특정 시간의 급식 식단 정보를 반환합니다.
+    """
     return get_app_time_from(await root(), time)
 
 
-@app.get("/today")
+# noinspection SpellCheckingInspection
+@app.get("/today", response_model=list[Meal])
 async def app_today():
+    """
+    오늘의 급식 식단 정보를 반환합니다.
+    """
     data = await ezneis.get_school_async(KEY, NAME)
     date = datetime.today().strftime("%Y%m%d")
     await data.load_meals(date=date)
     return await data.meals
 
 
-@app.get("/today/now")
+# noinspection SpellCheckingInspection
+@app.get("/today/now", response_model=list[Meal])
 async def app_today_now():
-    return get_app_now_from(await app_today())
+    """
+    현재 시각에 알맞은 급식 식단 정보를 반환합니다.
+
+    이 엔드포인트는 한 개 이하의 데이터를 반환함을 보장합니다.
+    """
+    meals = await app_today()
+    sec = get_today_sec()
+    match sec:
+        case sec if sec < BREAKFASTS: meals = meals.breakfasts
+        case sec if sec < LUNCHES:    meals = meals.lunches
+        case sec if sec < DINNERS:    meals = meals.dinners
+        case _:                       meals = tuple()
+    return only_one(meals)
 
 
-@app.get("/today/{time}")
+# noinspection SpellCheckingInspection
+@app.get("/today/{time}", response_model=list[Meal])
 async def app_today_time(
         time: Literal["breakfasts", "lunches", "dinners"]):
-    return get_app_time_from(await app_today(), time)
+    """
+    오늘의 특정 시각의 급식 식단 정보를 반환합니다.
+
+    이 엔드포인트는 한 개 이하의 데이터를 반환함을 보장합니다.
+    """
+    return only_one(get_app_time_from(await app_today(), time))
 
 
-@app.get("/auto")
+# noinspection SpellCheckingInspection
+@app.get("/auto", response_model=list[Meal])
 async def app_auto():
+    """
+    적절한 날의 급식 식단 정보를 반환합니다.
+
+    가령, 오늘이 주말인 경우 다음 주 월요일의 급식 식단 정보를 반환하고,
+    현재 시각이 저녁 시간을 지난 경우 익일의 급식 식단 정보를 반환합니다
+    (단, 금요일인 경우 다음 주 월요일의 급식 식단 정보를 반환합니다).
+    이외의 경우에는 오늘의 급식 식단 정보를 반환합니다.
+    """
     data = await ezneis.get_school_async(KEY, NAME)
     today = datetime.today()
     weekday = today.weekday()
@@ -87,6 +166,8 @@ async def app_auto():
         return await data.meals
     elif get_today_sec() >= DINNERS:
         tomorrow = today + timedelta(days=1)  # get tomorrow
+        if 4 < tomorrow.weekday():  # if today is friday
+            tomorrow = today + timedelta(days=3)  # get next monday
         date = tomorrow.strftime("%Y%m%d")
         await data.load_meals(date=date)
         return await data.meals
@@ -94,20 +175,58 @@ async def app_auto():
         return (await data.meals).today
 
 
-@app.get("/auto/now")
+# noinspection SpellCheckingInspection
+@app.get("/auto/now", response_model=list[Meal])
 async def app_auto_now():
-    return get_app_now_from(await app_auto())
+    """
+    적절한 날의 시각에 알맞은 급식 식단 정보를 반환합니다.
+
+    가령, 오늘이 주말인 경우 다음 주 월요일의 아침 급식 식단 정보를 반환하고,
+    현재 시각이 저녁 시간을 지난 경우 익일의 아침 급식 식단 정보를 반환합니다
+    (단, 금요일인 경우 다음 주 월요일의 아침 급식 식단 정보를 반환합니다).
+    이외의 경우에는 현재 시각에 알맞은 급식 식단 정보를 반환합니다.
+
+    이 엔드포인트는 한 개 이하의 데이터를 반환함을 보장합니다.
+    """
+    meals = await app_auto()
+    if len(meals) == 0:  # if there is no data
+        return tuple()
+    today = datetime.today().date()
+    if not meals[0].date == today:  # if data is not today's data
+        return only_one(meals.breakfasts)
+    sec = get_today_sec()
+    match sec:
+        case sec if sec < BREAKFASTS: meals = meals.breakfasts
+        case sec if sec < LUNCHES:    meals = meals.lunches
+        case sec if sec < DINNERS:    meals = meals.dinners
+        case _:                       meals = tuple()
+    return only_one(meals)
 
 
-@app.get("/auto/{time}")
+# noinspection SpellCheckingInspection
+@app.get("/auto/{time}", response_model=list[Meal])
 async def app_auto_time(
         time: Literal["breakfasts", "lunches", "dinners"]):
-    return get_app_time_from(await app_auto(), time)
+    """
+    적절한 날의 특정 시각의 급식 식단 정보를 반환합니다.
+
+    가령, 오늘이 주말인 경우 다음 주 월요일의 특정 시각의 급식 식단 정보를 반환하고,
+    현재 시각이 저녁 시간을 지난 경우 익일의 특정 시각의 급식 식단 정보를 반환합니다
+    (단, 금요일인 경우 다음 주 월요일의 특정 시각의 급식 식단 정보를 반환합니다).
+    이외의 경우에는 오늘의 특정 시각의 급식 식단 정보를 반환합니다.
+
+    이 엔드포인트는 한 개 이하의 데이터를 반환함을 보장합니다.
+    """
+    return only_one(get_app_time_from(await app_auto(), time))
 
 
-@app.get("/{weekday}")
+# noinspection SpellCheckingInspection
+@app.get("/{weekday}", response_model=list[Meal])
 async def app_weekday(
         weekday: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]):
+    """
+    이번 주의 특정 요일의 급식 식단 정보를 반환합니다.
+    """
     data = await ezneis.get_school_async(KEY, NAME)
     today = datetime.today()
     match weekday:
@@ -124,11 +243,19 @@ async def app_weekday(
     return await data.meals
 
 
-@app.get("/{weekday}/{time}")
+# noinspection SpellCheckingInspection
+@app.get("/{weekday}/{time}", response_model=list[Meal])
 async def app_weekday_time(
         weekday: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
         time: Literal["breakfasts", "lunches", "dinners"]):
-    return get_app_time_from(await app_weekday(weekday), time)
+    """
+    이번 주의 특정 요일의 특정 시간의 급식 식단 정보를 반환합니다.
+
+    이 엔드포인트는 한 개 이하의 데이터를 반환함을 보장합니다.
+    """
+    return only_one(get_app_time_from(await app_weekday(weekday), time))
+
+# endregion
 
 
 if __name__ == "__main__":

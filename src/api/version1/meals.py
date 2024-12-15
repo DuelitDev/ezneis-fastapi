@@ -1,44 +1,13 @@
 import ezneis
 from ..common import *
 from datetime import datetime, timedelta
+from ezneis.models.meal import Meal
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 from typing import Literal
 
 __all__ = [
     "app"
 ]
-
-
-# region models implementation
-
-class Dish(BaseModel):
-    name: str
-    allergies: tuple[Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
-                             12, 13, 14, 15, 16, 17, 18, 19], ...]
-
-
-class Nutrient(BaseModel):
-    name: str
-    unit: str = "mg"
-    value: float
-
-
-class Origin(BaseModel):
-    name: str
-    origin: str
-
-
-class Meal(BaseModel):
-    time: Literal[1, 2, 3]
-    date: str = "2025-01-01"
-    headcount: int
-    dishes: tuple[Dish, ...]
-    origins: tuple[Origin, ...]
-    kcal: float
-    nutrients: tuple[Nutrient, ...]
-
-# endregion
 
 
 # region utilities implementation
@@ -54,9 +23,7 @@ def get_today_sec() -> int:
 
 
 def only_one(it):
-    if len(it) == 1:
-        return it[0]
-    return type(it)()
+    return type(it)((it[0],) if len(it) != 0 else ())
 
 
 def get_app_time_from(meals, time: Literal["breakfasts", "lunches", "dinners"]):

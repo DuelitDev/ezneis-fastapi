@@ -1,9 +1,10 @@
 import ezneis
 import ezneis.exceptions
 import functions_framework
-from datetime import datetime
-from dataclasses import asdict
-from orjson import dumps
+from datetime import date, datetime
+from dataclasses import asdict, is_dataclass
+from enum import Enum
+from json import JSONEncoder, dumps
 from os import environ
 
 VERSION = "1.0.0"
@@ -13,14 +14,26 @@ LUNCHES    = 13 * 3600 + 10 * 60  # 13:10
 DINNERS    = 18 * 3600 + 10 * 60  # 18:10
 
 
+class CustomJSONEncoder(JSONEncoder):
+    def default(self, o):
+        if is_dataclass(o):
+            return asdict(o)
+        elif isinstance(o, date):
+            return o.strftime("%Y-%m-%d")
+        elif isinstance(o, Enum):
+            return o.value
+        return super().default(o)
+
+
 def to_json(models):
-    return dumps([asdict(model) for model in models]).decode("utf-8")
+    temp = [asdict(model) for model in models]
+    return dumps(temp, cls=CustomJSONEncoder, ensure_ascii=False)
 
 
 def endpoint_version(request):
     if request.method != "GET":
         return "Method must be GET.", 405
-    return dumps({"version": VERSION}).decode("utf-8"), 200
+    return dumps({"version": VERSION}, ensure_ascii=False), 200
 
 
 def endpoint_today(request):

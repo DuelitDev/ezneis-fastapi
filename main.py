@@ -1,9 +1,9 @@
 import ezneis
 import ezneis.exceptions
-import uvicorn
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from os import environ
+from vellox import Vellox
 
 VERSION = "1.0.0"
 KEY = environ.get("NEIS_OPEN_API_KEY", "")
@@ -55,5 +55,8 @@ async def general_exception_handler(request, exc):
     raise HTTPException(status_code=500, detail="Unknown Error.")
 
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="localhost", port=PORT)
+vellox = Vellox(app=app, lifespan="off")
+
+
+def endpoint(request):
+    return vellox(request)

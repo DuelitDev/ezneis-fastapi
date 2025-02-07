@@ -7,5 +7,5 @@ requires-python = ">=3.12"
 dependencies = [
     "ezneis==0.1.2",
     "fastapi==0.115.*",
-    "uvicorn[standard]==0.34.*",
+    "vellox==0.1.*",
 ]

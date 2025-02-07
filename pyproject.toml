@@ -1,0 +1,11 @@
+[project]
+name = "ezneis-fastapi"
+version = "1.0.0"
+description = "나이스 API 래퍼 ezneis를 이용한 GCP Cloud Run Functions"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "functions-framework==3.*",
+    "orjson==3.10.*",
+    "ezneis==0.1.2",
+]

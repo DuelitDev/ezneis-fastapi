@@ -1,36 +1,52 @@
 import ezneis
 import ezneis.exceptions
-from datetime import datetime
-from fastapi import FastAPI, HTTPException
+import functions_framework
+from datetime import date, datetime
+from dataclasses import asdict, is_dataclass
+from enum import Enum
+from json import JSONEncoder, dumps
 from os import environ
-from vellox import Vellox
 
 VERSION = "1.0.0"
-KEY = environ.get("NEIS_OPEN_API_KEY", "")
-PORT = int(environ.get("PORT", 8080))
-app = FastAPI()
+KEY = environ["API_KEY"]
+CORS = environ.get("CORS_DOMAINS", "*")
+HEADERS = {"Access-Control-Allow-Origin": CORS}
 
 BREAKFASTS = 8 * 3600 + 10 * 60  # 8:10
 LUNCHES = 13 * 3600 + 10 * 60  # 13:10
 DINNERS = 18 * 3600 + 10 * 60  # 18:10
 
 
-@app.get("/version")
-async def endpoint_version():
-    return {"version": VERSION}
+class CustomJSONEncoder(JSONEncoder):
+    def default(self, o):
+        if is_dataclass(o):
+            return asdict(o)
+        elif isinstance(o, date):
+            return o.strftime("%Y-%m-%d")
+        elif isinstance(o, Enum):
+            return o.value
+        return super().default(o)
 
 
-@app.get("/today")
-async def endpoint_today(code: str):
+def to_json(models):
+    temp = [asdict(model) for model in models]
+    return dumps(temp, cls=CustomJSONEncoder, ensure_ascii=False)
+
+
+def endpoint_version():
+    return dumps({"version": VERSION}, ensure_ascii=False)
+
+
+def endpoint_today(code):
     data = ezneis.get_school(KEY, code)
-    date = datetime.today().strftime("%Y%m%d")
-    data.load_meals(date=date)
-    return data.meals
+    data.load_meals(date=datetime.today().strftime("%Y%m%d"))
+    return to_json(data.meals)
 
 
-@app.get("/auto")
-async def endpoint_auto(code: str):
-    meals = await endpoint_today(code)
+def endpoint_auto(code):
+    data = ezneis.get_school(KEY, code)
+    data.load_meals(date=datetime.today().strftime("%Y%m%d"))
+    meals = data.meals
     today = datetime.today()
     today_sec = today.hour * 3600 + today.minute * 60 + today.second
     match today_sec:
@@ -41,22 +57,34 @@ async def endpoint_auto(code: str):
         case s if s < DINNERS:
             meals = meals.dinners
         case _:
-            return tuple()
-    return meals
+            return "[]"
+    return to_json(meals)
 
 
-@app.exception_handler(ezneis.exceptions.DataNotFoundException)
-async def data_not_found_exception_handler(request, exc):
-    raise HTTPException(status_code=404, detail="Data Not Found.")
+@functions_framework.errorhandler(500)
+def error_handler(error):
+    original = error.original_exception
+    if isinstance(original, AssertionError):
+        return "Valid Code is Required.", 400, HEADERS
+    elif isinstance(original, ezneis.exceptions.DataNotFoundException):
+        return "Data Not Found.", 404, HEADERS
+    return "Unknown Error.", 500, HEADERS
 
 
-@app.exception_handler(Exception)
-async def general_exception_handler(request, exc):
-    raise HTTPException(status_code=500, detail="Unknown Error.")
-
-
-vellox = Vellox(app=app, lifespan="off")
-
-
+@functions_framework.http
 def endpoint(request):
-    return vellox(request)
+    if request.method != "GET":
+        return "Method must be GET.", 405, HEADERS
+    code = request.args.get("code")
+    path = request.path.strip("/")
+    match path:
+        case "version":
+            return endpoint_version(), 200, HEADERS
+        case "today":
+            assert code is not None and len(code) == 7
+            return endpoint_today(code), 200, HEADERS
+        case "auto":
+            assert code is not None and len(code) == 7
+            return endpoint_auto(code), 200, HEADERS
+        case _:
+            return "Endpoint Not Found.", 404, HEADERS
